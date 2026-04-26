@@ -7,94 +7,83 @@ intensity (RPE) from velocity, and counts reps — for three lifts: deadlift,
 bench press, and squat.
 
 Built as part of a Computer Vision course project at Manipal Institute of
-Technology. Custom dataset collected from personal gym footage.
-
----
-
-## Demo
-
-| Deadlift | Bench Press | Squat |
-|----------|-------------|-------|
-| Bar path + velocity + RPE | YOLO+CSRT hybrid | MediaPipe depth detection |
+Technology. Custom dataset collected from personal gym footage and labelled
+manually.
 
 ---
 
 ## Features
 
 **All three lifts:**
-- Real-world scale calibration via click-based plate measurement (45cm reference)
-- Bar path drawn as a trajectory overlay on the video
-- Per-rep velocity calculation in m/s using frame timestamps and calibrated scale
-- RPE estimation from last-rep velocity using VBT (Velocity-Based Training) research
+- Click-based plate calibration — maps pixels to metres using a 45cm plate as reference
+- Bar path drawn as a live trajectory overlay on the video
+- Per-rep velocity in m/s using frame timestamps + calibrated scale
+- RPE estimation from last-rep velocity (Velocity-Based Training methodology)
 
 **Deadlift (`final_deadlift_v2.py`):**
-- Two-pass architecture: backend scan locks min/max bar height from the first rep,
-  so rep counting works correctly from frame 1
-- Pure YOLO inference — barbell is large and clearly visible in deadlifts
+- Two-pass architecture: backend scan locks the floor/lockout height thresholds
+  from the first rep so counting works correctly from frame 1
+- Pure YOLO inference per frame — barbell is large and clearly visible
 
 **Bench Press (`final_bench_v2.py`):**
-- YOLO + CSRT hybrid tracker: YOLO re-detects every 5 frames for accuracy,
-  CSRT tracker handles fast horizontal motion between YOLO frames
-- Backend scan (first 200 frames) initializes height thresholds before tracking begins
+- YOLO + CSRT hybrid: YOLO re-detects every 5 frames, CSRT handles
+  fast horizontal motion between detections
+- Backend scan (first 200 frames) pre-initialises height thresholds
+  before the main loop, fixing the "first rep never counted" bug
 
 **Squat (`squats_v2.py`):**
-- Dual-sensor system: MediaPipe Pose for depth detection, YOLO for bar path
-- Depth validated by hip-below-knee criterion and knee angle (< 90°)
-- Moving average smoothing on landmark positions to reduce MediaPipe jitter
-- Rep counted only after confirmed depth + return to lockout (angle > 160°)
+- Dual-sensor: MediaPipe Pose for depth/rep detection, YOLO + CSRT for bar path
+- Depth detected via knee angle (< 100°) — more reliable than hip-below-knee
+  pixel comparison across different camera distances and angles
+- Configurable unracking skip (`SKIP_SECONDS`) to ignore the walk-out
+  before any rep counting begins
+- Live state debug overlay: `IN SQUAT / RISING / STANDING` + frame counter
 
 ---
 
-## How It Works
+## RPE from Velocity (Velocity-Based Training)
 
-### 1. Calibration
+| Deadlift | Bench | Squat | Est. RPE |
+|----------|-------|-------|----------|
+| ≥ 0.70 m/s | ≥ 0.45 m/s | ≥ 0.50 m/s | RPE 6 |
+| ≥ 0.60 m/s | ≥ 0.35 m/s | ≥ 0.40 m/s | RPE 7 |
+| ≥ 0.50 m/s | ≥ 0.25 m/s | ≥ 0.30 m/s | RPE 8 |
+| ≥ 0.40 m/s | ≥ 0.15 m/s | ≥ 0.20 m/s | RPE 9 |
+| < 0.40 m/s | < 0.15 m/s | < 0.20 m/s | RPE 10 |
+
+*Based on: Sánchez-Medina & González-Badillo (2011) and VBT research.*
+
+---
+
+## How Calibration Works
+
 On startup, the first frame is displayed. Click on two points along the edge
-of a 45cm competition plate. This maps pixels to metres for velocity calculation.
+of a 45cm competition plate. This maps pixels to real-world metres:
 
 ```
-px_to_m = 0.45 / distance_in_pixels
-velocity = displacement_m / rep_time_s
+px_to_m  = 0.45 / distance_between_clicks_in_pixels
+velocity = (bar_displacement_px × px_to_m) / rep_time_seconds
 ```
 
-### 2. RPE from Velocity (VBT)
-
-| Deadlift Velocity | Bench Velocity | Estimated RPE |
-|-------------------|----------------|---------------|
-| ≥ 0.70 m/s        | ≥ 0.45 m/s     | RPE 6–7       |
-| ≥ 0.60 m/s        | ≥ 0.35 m/s     | RPE 7–8       |
-| ≥ 0.50 m/s        | ≥ 0.25 m/s     | RPE 8–9       |
-| ≥ 0.40 m/s        | ≥ 0.15 m/s     | RPE 9–9.5     |
-| < 0.40 m/s        | < 0.15 m/s     | RPE 10        |
-
-*Source: Sánchez-Medina & González-Badillo (2011), VBT research.*
-
-### 3. Rep Counting
-
-**Deadlift / Bench:**
-Thresholds set from backend scan. A rep is counted when the bar travels
-from the bottom zone (floor / chest) through the full range to the
-top zone (lockout), with a minimum displacement to filter noise.
-
-**Squat:**
-MediaPipe detects the right hip and knee landmarks. A rep is counted when
-the hip drops below the knee (depth confirmed for ≥ 10 frames) and then
-the lifter returns to full lockout (knee angle > 160°).
+The same calibration window is used in all three scripts.
 
 ---
 
 ## Dataset
 
-Custom dataset built from personal gym training footage:
+Custom dataset built from personal gym training footage, labelled manually
+using Roboflow.
 
 | Split | Images |
 |-------|--------|
-| Train | ~2,400 |
-| Val   | ~600   |
-| **Total** | **~3,000** |
+| Train | ~700   |
+| Val   | ~170   |
+| **Total** | **~870** |
 
 - **Single class:** `barbell_end` (the circular plate end of the barbell)
-- **Format:** YOLO `.txt` annotation files
-- **Training:** YOLOv8n, 200 epochs, 640px image size
+- **Format:** YOLO `.txt` bounding box annotations
+- **Base model:** YOLOv8n (nano — chosen for inference speed)
+- **Training:** 200 epochs, 640px image size, GPU
 
 **Best model performance (train17):**
 
@@ -105,52 +94,52 @@ Custom dataset built from personal gym training footage:
 
 ---
 
-## Setup
+## Known Limitations
 
-```bash
-# Clone the repo
-git clone https://github.com/sahityajain360/barbell-tracker
-cd barbell-tracker
+**Dataset size and generalisation:**
+The training dataset has ~870 images collected from a single gym environment.
+The model works well on similar footage but may struggle with different gyms,
+lighting conditions, or barbell styles. A larger, more diverse dataset would
+significantly improve robustness.
 
-# Install dependencies
-pip install -r requirements.txt
+**Playback speed:**
+Running YOLO + CSRT + MediaPipe simultaneously produces lower-than-realtime
+frame rates on mid-range hardware. The video will appear slower than the
+original. Using a dedicated GPU or reducing inference resolution helps.
 
-# Place your video in the project root and update VIDEO_PATH in the script
-```
+**Velocity accuracy:**
+Velocity is calculated from vertical bar displacement between the start and
+end of the concentric phase. If the tracker loses the barbell mid-rep, the
+velocity reading for that rep will be incorrect. The squat tracker prints
+a console warning when this happens.
 
-**Requirements:**
-```
-ultralytics>=8.0.0
-opencv-python>=4.8.0
-numpy>=1.24.0
-mediapipe>=0.10.0
-```
-
-GPU recommended (CUDA). The scripts call `model.to("cuda")` — change to
-`model.to("cpu")` if running on CPU only.
+**Single plate assumption:**
+Calibration assumes a standard 45cm diameter plate is visible in frame.
+Update `PLATE_DIAMETER_M` in the config block if using smaller plates.
 
 ---
 
-## Usage
-
-Each script has a `CONFIG` block at the top. Change `VIDEO_PATH` to point
-to your video before running.
+## Setup
 
 ```bash
-# Deadlift
+git clone https://github.com/sahityajain360/barbell-tracker
+cd barbell-tracker
+pip install -r requirements.txt
+```
+
+GPU recommended. Change `model.to("cuda")` to `model.to("cpu")` if needed.
+
+Place your video in the `videos/` folder and update `VIDEO_PATH` in the
+config block at the top of each script.
+
+```bash
 python final_deadlift_v2.py
-
-# Bench Press
 python final_bench_v2.py
-
-# Squat
 python squats_v2.py
 ```
 
-**At startup:** A window shows the first frame. Click on the top and bottom
-edges of a 45cm plate to calibrate. Press any key to begin tracking.
-
-**During tracking:** Press `Q` to quit.
+At startup: click two points on the plate edge to calibrate, then press
+any key to begin tracking. Press `Q` to quit.
 
 ---
 
@@ -158,9 +147,9 @@ edges of a 45cm plate to calibrate. Press any key to begin tracking.
 
 ```
 barbell-tracker/
-├── final_deadlift_v2.py    # Deadlift tracker (two-pass, pure YOLO)
-├── final_bench_v2.py       # Bench tracker (YOLO + CSRT hybrid)
-├── squats_v2.py            # Squat tracker (YOLO + MediaPipe)
+├── final_deadlift_v2.py    # Deadlift — two-pass YOLO
+├── final_bench_v2.py       # Bench — YOLO + CSRT hybrid
+├── squats_v2.py            # Squat — YOLO + MediaPipe
 ├── weights/
 │   └── best.pt             # Trained YOLOv8n weights (~6MB)
 ├── dataset/
@@ -173,13 +162,15 @@ barbell-tracker/
 
 ## Future Work
 
-- **Live camera mode** — real-time tracking via webcam or phone camera feed,
-  enabling a competition-style judging system with voice commands
-  ("Squat", "Press", "Rack") and automatic white/red light verdicts
-- **Scale without calibration** — estimate px_to_m automatically using
-  pose landmark proportions (shoulder width as reference)
-- **Multi-barbell tracking** — handle training partners in the same frame
-- **Web interface** — upload a video and receive an annotated output file
+- **Live camera mode** — real-time tracking via webcam or phone camera,
+  enabling competition-style judging with voice commands ("Squat", "Press",
+  "Rack") and automatic pass/fail verdicts per rep
+- **Larger dataset** — more diverse gym environments and lighting to improve
+  generalisation across different barbells and settings
+- **Automatic scale detection** — estimate real-world scale from pose landmark
+  proportions (shoulder width) to remove the manual calibration step
+- **Processing speed** — frame skipping or async inference to achieve closer
+  to real-time playback on mid-range hardware
 
 ---
 
