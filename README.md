@@ -72,7 +72,7 @@ The same calibration window is used in all three scripts.
 ## Dataset
 
 Custom dataset built from personal gym training footage, labelled manually
-using Roboflow.
+using Label Studio.
 
 | Split | Images |
 |-------|--------|
